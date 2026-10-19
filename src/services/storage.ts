@@ -23,6 +23,10 @@ export const storageService = {
   savePlatforms(platforms: Platform[]): void {
     try {
       localStorage.setItem(STORAGE_KEY_PLATFORMS, JSON.stringify(platforms));
+      // Background sync with Firestore
+      import('./firebase').then(({ saveAllPlatformsToFirestore }) => {
+        saveAllPlatformsToFirestore(platforms).catch((e) => console.warn('Firestore sync note:', e));
+      });
       // Try background sync with server if available
       fetch('/api/platforms', {
         method: 'POST',
@@ -68,6 +72,10 @@ export const storageService = {
   saveSettings(settings: SiteSettings): void {
     try {
       localStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(settings));
+      // Background sync with Firestore
+      import('./firebase').then(({ saveSettingsToFirestore }) => {
+        saveSettingsToFirestore(settings).catch((e) => console.warn('Firestore settings sync note:', e));
+      });
       // Try background sync with server if available
       fetch('/api/settings', {
         method: 'POST',

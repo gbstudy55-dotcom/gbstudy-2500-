@@ -34,8 +34,35 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
 
-  // Load from backend on mount if server is running
+  // Real-time Cloud Firestore Database Sync + Connection Test
   useEffect(() => {
+    // 1. Test Firestore connection on boot
+    import('./services/firebase').then(({ testFirestoreConnection, subscribeToPlatforms, subscribeToSettings }) => {
+      testFirestoreConnection();
+
+      // 2. Subscribe to real-time platforms updates from Cloud Firestore
+      const unsubPlatforms = subscribeToPlatforms((livePlatforms) => {
+        if (livePlatforms && livePlatforms.length > 0) {
+          setPlatforms(livePlatforms);
+        }
+      });
+
+      // 3. Subscribe to real-time site settings from Cloud Firestore
+      const unsubSettings = subscribeToSettings((liveSettings) => {
+        if (liveSettings) {
+          setSettings(liveSettings);
+        }
+      });
+
+      return () => {
+        unsubPlatforms();
+        unsubSettings();
+      };
+    }).catch((err) => {
+      console.warn('Firestore initialization notice:', err);
+    });
+
+    // Fallback sync with local backend server if running
     fetch('/api/data')
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
@@ -46,9 +73,7 @@ export default function App() {
           setSettings((prev) => ({ ...prev, ...data.settings }));
         }
       })
-      .catch(() => {
-        // Fallback to local storage is already done
-      });
+      .catch(() => {});
   }, []);
 
   // Show Telegram Popup on initial visit (matching video behavior)
