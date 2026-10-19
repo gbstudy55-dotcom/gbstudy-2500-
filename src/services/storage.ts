@@ -3,7 +3,6 @@ import { defaultPlatforms, defaultSettings } from '../data/defaultPlatforms';
 import {
   saveAllPlatformsToFirestore,
   saveSettingsToFirestore,
-  deletePlatformFromFirestore,
   sanitizePlatform,
   sanitizeSettings,
 } from './firebase';
@@ -35,19 +34,23 @@ export const storageService = {
       console.error('Error saving platforms to localStorage:', e);
     }
 
-    // Direct synchronization to Cloud Firestore (Handles Adds, Edits, Deletes & Order across all users)
+    // Direct synchronization to Server API (Broadcasts via SSE instantly to all users)
+    try {
+      await fetch('/api/platforms', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ platforms: cleaned }),
+      });
+    } catch (err) {
+      console.warn('Server API sync error:', err);
+    }
+
+    // Direct synchronization to Cloud Firestore
     try {
       await saveAllPlatformsToFirestore(cleaned);
     } catch (err) {
       console.warn('Firestore sync note:', err);
     }
-
-    // Optional local server backup
-    fetch('/api/platforms', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ platforms: cleaned }),
-    }).catch(() => {});
   },
 
   getSettings(): SiteSettings {
@@ -67,7 +70,6 @@ export const storageService = {
             ...(parsed.accessKeySettings || {}),
           },
         };
-        // Migrate default passcode to GBADMIN2026 if it was older default
         if (!result.adminPasscode || result.adminPasscode === 'gbstudy123' || result.adminPasscode === 'admin123') {
           result.adminPasscode = 'GBADMIN2026';
         }
@@ -87,29 +89,39 @@ export const storageService = {
       console.error('Error saving settings to localStorage:', e);
     }
 
+    // Direct synchronization to Server API (Broadcasts via SSE instantly to all users)
+    try {
+      await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ settings: clean }),
+      });
+    } catch (err) {
+      console.warn('Server settings sync error:', err);
+    }
+
     // Direct synchronization to Cloud Firestore
     try {
       await saveSettingsToFirestore(clean);
     } catch (err) {
       console.warn('Firestore settings sync note:', err);
     }
-
-    fetch('/api/settings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ settings: clean }),
-    }).catch(() => {});
   },
 
   async resetDefaults(): Promise<{ platforms: Platform[]; settings: SiteSettings }> {
     const cleanPlatforms = defaultPlatforms.map((p, i) => sanitizePlatform({ ...p, order: i + 1 }));
     const cleanSettings = sanitizeSettings(defaultSettings);
-
     try {
       localStorage.setItem(STORAGE_KEY_PLATFORMS, JSON.stringify(cleanPlatforms));
       localStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(cleanSettings));
     } catch (e) {
       console.error('Error resetting storage:', e);
+    }
+
+    try {
+      await fetch('/api/reset', { method: 'POST' });
+    } catch (e) {
+      console.error('Error calling reset API:', e);
     }
 
     try {

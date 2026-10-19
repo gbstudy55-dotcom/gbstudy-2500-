@@ -3,7 +3,7 @@ import { Platform, SiteSettings } from '../types';
 export const defaultSettings: SiteSettings = {
   siteName: "GB STUDY",
   tagline: "Education Must be Free For Everyone",
-  logoUrl: "/logo.png",
+  logoUrl: "https://i.ibb.co/Q3g9fGSt/1791541921524.png",
   telegramChannelUrl: "https://t.me/GBFreestudy",
   telegramPopup: {
     enabled: true,
@@ -237,7 +237,7 @@ export const defaultPlatforms: Platform[] = [
     description: "Vikas Divyakirti Sir - Hindi & English medium UPSC guidance",
     order: 12,
     active: true,
-  }
+  },
 ];
 
 // Presets that admin can pick from with one click

@@ -32,7 +32,6 @@ export const HeroHeader: React.FC<HeroHeaderProps> = ({
     if (now - lastTapTime < 1800) {
       newCount = tapCount + 1;
     }
-
     setLastTapTime(now);
     setTapCount(newCount);
 
@@ -40,13 +39,13 @@ export const HeroHeader: React.FC<HeroHeaderProps> = ({
     if (newCount >= 10 && newCount < 20) {
       setShowSecretHint(true);
     }
-
     if (newCount >= 20) {
       setTapCount(0);
       setShowSecretHint(false);
       onTriggerSecretAdmin();
     }
   };
+
   return (
     <div className="relative pt-6 pb-8 px-4 text-center flex flex-col items-center">
       {/* Radial green ambient glow */}

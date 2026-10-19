@@ -15,8 +15,15 @@ import { Platform, SiteSettings } from '../types';
 import { defaultPlatforms, defaultSettings } from '../data/defaultPlatforms';
 
 // Initialize Firebase App & Firestore Database
-const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+let dbInstance: any = null;
+try {
+  const app = initializeApp(firebaseConfig);
+  dbInstance = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+} catch (e) {
+  console.warn('Firebase initialization note:', e);
+}
+
+export const db = dbInstance;
 
 enum OperationType {
   CREATE = 'create',
@@ -84,6 +91,7 @@ export function sanitizeSettings(s: Partial<SiteSettings>): SiteSettings {
 
 // Test Connection on Startup
 export async function testFirestoreConnection() {
+  if (!db) return;
   try {
     await getDocFromServer(doc(db, 'settings', 'general'));
   } catch (error) {
@@ -97,68 +105,74 @@ export async function testFirestoreConnection() {
 export function subscribeToPlatforms(
   onUpdate: (platforms: Platform[]) => void
 ): () => void {
-  const colRef = collection(db, 'platforms');
-
-  const unsubscribe = onSnapshot(
-    colRef,
-    (snapshot) => {
-      if (!snapshot.empty) {
-        const list: Platform[] = [];
-        snapshot.forEach((d) => {
-          list.push(sanitizePlatform(d.data() as Platform));
-        });
-        // Sort by order ascending
-        list.sort((a, b) => (a.order || 0) - (b.order || 0));
-        onUpdate(list);
-      } else {
-        // If collection is empty, seed initial defaults to Cloud Firestore
-        seedInitialFirestoreData();
+  if (!db) return () => {};
+  try {
+    const colRef = collection(db, 'platforms');
+    const unsubscribe = onSnapshot(
+      colRef,
+      (snapshot) => {
+        if (!snapshot.empty) {
+          const list: Platform[] = [];
+          snapshot.forEach((d) => {
+            list.push(sanitizePlatform(d.data() as Platform));
+          });
+          // Sort by order ascending
+          list.sort((a, b) => (a.order || 0) - (b.order || 0));
+          onUpdate(list);
+        } else {
+          // If collection is empty, seed initial defaults to Cloud Firestore
+          seedInitialFirestoreData();
+        }
+      },
+      (err) => {
+        handleFirestoreError(err, OperationType.GET, 'platforms');
       }
-    },
-    (err) => {
-      handleFirestoreError(err, OperationType.GET, 'platforms');
-    }
-  );
-
-  return unsubscribe;
+    );
+    return unsubscribe;
+  } catch (err) {
+    console.warn('subscribeToPlatforms init error:', err);
+    return () => {};
+  }
 }
 
 // Subscribe to settings in real-time
 export function subscribeToSettings(
   onUpdate: (settings: SiteSettings) => void
 ): () => void {
-  const settingsDoc = doc(db, 'settings', 'general');
-
-  const unsubscribe = onSnapshot(
-    settingsDoc,
-    (snapshot) => {
-      if (snapshot.exists()) {
-        const data = snapshot.data();
-        onUpdate(sanitizeSettings(data as Partial<SiteSettings>));
-      } else {
-        // Seed default settings to Firestore
-        setDoc(settingsDoc, sanitizeSettings(defaultSettings)).catch((e) =>
-          handleFirestoreError(e, OperationType.WRITE, 'settings/general')
-        );
+  if (!db) return () => {};
+  try {
+    const settingsDoc = doc(db, 'settings', 'general');
+    const unsubscribe = onSnapshot(
+      settingsDoc,
+      (snapshot) => {
+        if (snapshot.exists()) {
+          const data = snapshot.data();
+          onUpdate(sanitizeSettings(data as Partial<SiteSettings>));
+        } else {
+          // Seed default settings to Firestore
+          setDoc(settingsDoc, sanitizeSettings(defaultSettings)).catch((e) =>
+            handleFirestoreError(e, OperationType.WRITE, 'settings/general')
+          );
+        }
+      },
+      (err) => {
+        handleFirestoreError(err, OperationType.GET, 'settings/general');
       }
-    },
-    (err) => {
-      handleFirestoreError(err, OperationType.GET, 'settings/general');
-    }
-  );
-
-  return unsubscribe;
+    );
+    return unsubscribe;
+  } catch (err) {
+    console.warn('subscribeToSettings init error:', err);
+    return () => {};
+  }
 }
 
 // Save all platforms: Synchronizes local list with Cloud Firestore
-// - Automatically DELETES documents from Firestore that were deleted in admin
-// - Upserts all active/reordered platforms
 export async function saveAllPlatformsToFirestore(platforms: Platform[]): Promise<void> {
+  if (!db) return;
   try {
     const snapshot = await getDocs(collection(db, 'platforms'));
     const remoteDocIds = new Set(snapshot.docs.map((d) => d.id));
     const localDocIds = new Set(platforms.map((p) => p.id));
-
     const batch = writeBatch(db);
 
     // 1. Delete documents that are no longer in platforms list
@@ -177,47 +191,47 @@ export async function saveAllPlatformsToFirestore(platforms: Platform[]): Promis
     await batch.commit();
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, 'platforms');
-    throw err;
   }
 }
 
 // Save single platform
 export async function savePlatformToFirestore(platform: Platform): Promise<void> {
+  if (!db) return;
   const clean = sanitizePlatform(platform);
   const docRef = doc(db, 'platforms', clean.id);
   try {
     await setDoc(docRef, clean);
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, `platforms/${clean.id}`);
-    throw err;
   }
 }
 
 // Delete single platform directly from Firestore
 export async function deletePlatformFromFirestore(platformId: string): Promise<void> {
+  if (!db) return;
   const docRef = doc(db, 'platforms', platformId);
   try {
     await deleteDoc(docRef);
   } catch (err) {
     handleFirestoreError(err, OperationType.DELETE, `platforms/${platformId}`);
-    throw err;
   }
 }
 
 // Save site settings to Firestore
 export async function saveSettingsToFirestore(settings: SiteSettings): Promise<void> {
+  if (!db) return;
   const clean = sanitizeSettings(settings);
   const settingsDoc = doc(db, 'settings', 'general');
   try {
     await setDoc(settingsDoc, clean);
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, 'settings/general');
-    throw err;
   }
 }
 
 // Seed initial platforms into Cloud Firestore
 export async function seedInitialFirestoreData(): Promise<void> {
+  if (!db) return;
   try {
     const snapshot = await getDocs(collection(db, 'platforms'));
     if (snapshot.empty) {

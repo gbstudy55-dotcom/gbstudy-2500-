@@ -103,7 +103,6 @@ export const AccessKeyModal: React.FC<AccessKeyModalProps> = ({
               className="w-full px-4 py-2.5 rounded-xl bg-[#121c16] border border-[#233a2a] focus:border-emerald-500 text-sm text-center font-mono tracking-widest text-emerald-300 placeholder-gray-500 outline-none uppercase"
             />
           </div>
-
           <button
             type="submit"
             className="w-full py-2.5 rounded-xl font-bold text-xs uppercase tracking-wider bg-emerald-500 hover:bg-emerald-400 text-black shadow-[0_0_15px_rgba(34,197,94,0.3)] transition-all cursor-pointer"

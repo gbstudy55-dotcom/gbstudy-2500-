@@ -16,6 +16,8 @@ import {
   Check,
   Eye,
   Key,
+  Star,
+  Layers,
 } from 'lucide-react';
 import { Platform, SiteSettings } from '../types';
 import { platformPresets } from '../data/defaultPlatforms';
@@ -56,7 +58,6 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [passcode, setPasscode] = useState('');
   const [passcodeError, setPasscodeError] = useState('');
-
   const [activeTab, setActiveTab] = useState<'platforms' | 'telegram' | 'branding' | 'backup'>('platforms');
 
   // Form states for Add/Edit platform
@@ -64,6 +65,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [name, setName] = useState('');
   const [url, setUrl] = useState('');
+  const [orderNum, setOrderNum] = useState<number>(1);
   const [icon, setIcon] = useState('');
   const [glowColor, setGlowColor] = useState('#22c55e');
   const [category, setCategory] = useState('');
@@ -77,9 +79,8 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   // Branding settings form
   const [siteName, setSiteName] = useState(settings.siteName);
   const [tagline, setTagline] = useState(settings.tagline);
-  const [logoUrl, setLogoUrl] = useState(settings.logoUrl);
+  const [logoUrl, setLogoUrl] = useState(settings.logoUrl || 'https://i.ibb.co/Q3g9fGSt/1791541921524.png');
   const [newAdminPasscode, setNewAdminPasscode] = useState('');
-
   const [notification, setNotification] = useState<string | null>(null);
 
   if (!isOpen) return null;
@@ -109,10 +110,12 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     setCategory('General');
     setDescription('');
     setOpenMode('newtab');
+    setOrderNum(platforms.length + 1);
     setIsFormOpen(true);
   };
 
   const handleEditPlatform = (platform: Platform) => {
+    const currentIdx = platforms.findIndex((p) => p.id === platform.id);
     setEditingPlatformId(platform.id);
     setName(platform.name);
     setUrl(platform.url);
@@ -121,18 +124,17 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     setCategory(platform.category || '');
     setDescription(platform.description || '');
     setOpenMode(platform.openMode || 'newtab');
+    setOrderNum(platform.order || currentIdx + 1);
     setIsFormOpen(true);
   };
 
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
     if (!file.type.startsWith('image/')) {
       showNotify('Kripya valid image file chunein (JPG, PNG, WEBP)');
       return;
     }
-
     const reader = new FileReader();
     reader.onload = (uploadEvent) => {
       const img = new Image();
@@ -169,23 +171,29 @@ export const AdminModal: React.FC<AdminModalProps> = ({
       )}" text-anchor="middle">${encodeURIComponent(name.substring(0, 2).toUpperCase())}</text></svg>`;
     }
 
-    let updatedList: Platform[];
+    const targetPos = Math.max(1, Math.min(orderNum || 1, platforms.length + (editingPlatformId ? 0 : 1)));
+    let updatedList: Platform[] = [...platforms];
+
     if (editingPlatformId) {
-      updatedList = platforms.map((p) =>
-        p.id === editingPlatformId
-          ? {
-              ...p,
-              name: name.trim(),
-              url: url.trim(),
-              icon: resolvedIcon,
-              glowColor,
-              category: category.trim(),
-              description: description.trim(),
-              openMode,
-            }
-          : p
-      );
-      showNotify(`Updated ${name}`);
+      const currentIdx = updatedList.findIndex((p) => p.id === editingPlatformId);
+      const existing = updatedList[currentIdx];
+      const updatedItem: Platform = {
+        ...existing,
+        name: name.trim(),
+        url: url.trim(),
+        icon: resolvedIcon,
+        glowColor,
+        category: category.trim(),
+        description: description.trim(),
+        openMode,
+        order: targetPos,
+      };
+
+      if (currentIdx !== -1) {
+        updatedList.splice(currentIdx, 1);
+      }
+      updatedList.splice(targetPos - 1, 0, updatedItem);
+      showNotify(`Updated "${name}" at Position #${targetPos}`);
     } else {
       const newPlatform: Platform = {
         id: `custom-${Date.now()}`,
@@ -195,13 +203,19 @@ export const AdminModal: React.FC<AdminModalProps> = ({
         glowColor,
         category: category.trim() || 'General',
         description: description.trim(),
-        order: platforms.length + 1,
+        order: targetPos,
         active: true,
         openMode,
       };
-      updatedList = [...platforms, newPlatform];
-      showNotify(`Added ${name}`);
+      updatedList.splice(targetPos - 1, 0, newPlatform);
+      showNotify(`Added "${name}" at Position #${targetPos}`);
     }
+
+    // Re-index all orders cleanly to 1, 2, 3...
+    updatedList = updatedList.map((p, i) => ({
+      ...p,
+      order: i + 1,
+    }));
 
     onSavePlatforms(updatedList);
     setIsFormOpen(false);
@@ -209,20 +223,37 @@ export const AdminModal: React.FC<AdminModalProps> = ({
 
   const handleDeletePlatform = (id: string, platformName: string) => {
     if (confirm(`Are you sure you want to delete "${platformName}"?`)) {
-      const updated = platforms.filter((p) => p.id !== id);
+      const updated = platforms.filter((p) => p.id !== id).map((p, i) => ({ ...p, order: i + 1 }));
       onSavePlatforms(updated);
       showNotify(`Deleted ${platformName}`);
+    }
+  };
+
+  const handleClearAllPlatforms = () => {
+    if (confirm('Kya aap sabhi platforms ko hatana chahte hain taaki aap 1 number se apne naye platforms jod sakein?')) {
+      onSavePlatforms([]);
+      showNotify('Sabhi platforms hata diye gaye! Ab naya platform 1 number se judega.');
     }
   };
 
   const handleMovePlatform = (index: number, direction: 'up' | 'down') => {
     const newIdx = direction === 'up' ? index - 1 : index + 1;
     if (newIdx < 0 || newIdx >= platforms.length) return;
-
     const updated = [...platforms];
     const [moved] = updated.splice(index, 1);
     updated.splice(newIdx, 0, moved);
-    onSavePlatforms(updated);
+    const reindexed = updated.map((p, i) => ({ ...p, order: i + 1 }));
+    onSavePlatforms(reindexed);
+  };
+
+  const handleMoveToTop = (index: number) => {
+    if (index === 0) return;
+    const updated = [...platforms];
+    const [item] = updated.splice(index, 1);
+    updated.unshift(item);
+    const reindexed = updated.map((p, i) => ({ ...p, order: i + 1 }));
+    onSavePlatforms(reindexed);
+    showNotify(`"${item.name}" ko Position #1 par set kar diya!`);
   };
 
   const handleAddPreset = (preset: typeof platformPresets[0]) => {
@@ -238,7 +269,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
       active: true,
     };
     onSavePlatforms([...platforms, newPlatform]);
-    showNotify(`Added ${preset.name} from presets!`);
+    showNotify(`Added ${preset.name} at Position #${platforms.length + 1}!`);
   };
 
   const handleSaveTelegram = (e: React.FormEvent) => {
@@ -260,7 +291,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
       ...settings,
       siteName: siteName.trim() || 'GB STUDY',
       tagline: tagline.trim(),
-      logoUrl: logoUrl.trim() || '/logo.png',
+      logoUrl: logoUrl.trim() || 'https://i.ibb.co/Q3g9fGSt/1791541921524.png',
       adminPasscode: newAdminPasscode.trim() || settings.adminPasscode,
     };
     onSaveSettings(updatedSettings);
@@ -285,7 +316,6 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   const handleImportJSON = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
     const reader = new FileReader();
     reader.onload = (event) => {
       try {
@@ -317,10 +347,9 @@ export const AdminModal: React.FC<AdminModalProps> = ({
               <h2 className="text-lg font-bold text-white flex items-center gap-2">
                 GB STUDY Admin Control Panel
               </h2>
-              <p className="text-xs text-gray-400">Add, edit platforms, URLs, icons & Telegram popups</p>
+              <p className="text-xs text-gray-400">Add, edit, reorder platforms, URLs, icons & Telegram popups</p>
             </div>
           </div>
-
           <button
             onClick={onClose}
             className="p-2 rounded-xl text-gray-400 hover:text-white bg-white/5 hover:bg-white/10"
@@ -348,13 +377,11 @@ export const AdminModal: React.FC<AdminModalProps> = ({
             <p className="text-xs text-gray-400 mb-6">
               Enter admin passcode to manage platforms and settings. (Default passcode: <span className="text-emerald-400 font-mono font-semibold">GBADMIN2026</span>)
             </p>
-
             {passcodeError && (
               <div className="text-xs text-red-400 mb-4 bg-red-950/50 p-2.5 rounded-xl border border-red-800/60">
                 {passcodeError}
               </div>
             )}
-
             <form onSubmit={handleLogin} className="space-y-4">
               <input
                 type="password"
@@ -429,10 +456,24 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                 {/* Actions Toolbar */}
                 <div className="flex flex-wrap items-center justify-between gap-3 bg-[#0d1711] p-3 rounded-2xl border border-[#1b3123]">
                   <div>
-                    <h4 className="text-sm font-bold text-white">Active Platforms</h4>
-                    <p className="text-xs text-gray-400">Total {platforms.length} platforms available for students</p>
+                    <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                      <Layers className="w-4 h-4 text-emerald-400" />
+                      Active Platforms ({platforms.length})
+                    </h4>
+                    <p className="text-xs text-gray-400">
+                      Platforms usi kram (order #1, #2, #3...) me students ko dikhenge
+                    </p>
                   </div>
                   <div className="flex items-center gap-2">
+                    {platforms.length > 0 && (
+                      <button
+                        onClick={handleClearAllPlatforms}
+                        className="px-3 py-2 rounded-xl bg-red-950/40 hover:bg-red-900/50 text-red-300 border border-red-800/40 text-xs font-semibold transition-all cursor-pointer"
+                        title="Sabhi platforms hatayein"
+                      >
+                        Clear All
+                      </button>
+                    )}
                     <button
                       onClick={handleOpenAddForm}
                       className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-bold transition-all shadow-md cursor-pointer"
@@ -452,7 +493,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                     <div className="flex items-center justify-between border-b border-[#1e3425] pb-3">
                       <h4 className="font-bold text-sm text-emerald-400 flex items-center gap-2">
                         {editingPlatformId ? <Edit2 className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-                        {editingPlatformId ? 'Edit Platform' : 'Add New Platform'}
+                        {editingPlatformId ? 'Edit Platform Details' : 'Add New Platform'}
                       </h4>
                       <button
                         type="button"
@@ -494,6 +535,28 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                         />
                       </div>
 
+                      {/* Position / Order Number */}
+                      <div>
+                        <label className="block text-xs font-semibold text-gray-300 mb-1">
+                          Platform Position / Number (Kramank) *
+                        </label>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="number"
+                            min={1}
+                            max={platforms.length + (editingPlatformId ? 0 : 1)}
+                            value={orderNum}
+                            onChange={(e) => setOrderNum(parseInt(e.target.value) || 1)}
+                            className="w-24 px-3 py-2 rounded-xl bg-[#122119] border border-[#213a29] text-white text-xs font-mono font-bold text-center outline-none focus:border-emerald-500"
+                          />
+                          <span className="text-[11px] text-emerald-400 font-medium">
+                            {orderNum === 1
+                              ? '🌟 Ye website par 1st number par dikhega'
+                              : `Position #${orderNum} par rahega`}
+                          </span>
+                        </div>
+                      </div>
+
                       {/* Category */}
                       <div>
                         <label className="block text-xs font-semibold text-gray-300 mb-1">
@@ -509,7 +572,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                       </div>
 
                       {/* Glow Accent Color */}
-                      <div>
+                      <div className="sm:col-span-2">
                         <label className="block text-xs font-semibold text-gray-300 mb-1">
                           Icon Glow Color
                         </label>
@@ -629,7 +692,6 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                             />
                           </label>
                         </div>
-
                         <div className="flex items-center gap-3">
                           <input
                             type="text"
@@ -720,98 +782,128 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                   </div>
                 </div>
 
-                {/* Platforms List */}
+                {/* Platforms List with Prominent Position Numbers and Easy Edit */}
                 <div className="space-y-2">
-                  {platforms.map((platform, idx) => (
-                    <div
-                      key={platform.id}
-                      className="flex items-center justify-between p-3 rounded-2xl bg-[#0c140f] border border-[#182b1f] hover:border-[#243e2d] transition-all"
-                    >
-                      <div className="flex items-center gap-3 min-w-0">
-                        {/* Drag / Reorder buttons */}
-                        <div className="flex flex-col gap-0.5">
-                          <button
-                            onClick={() => handleMovePlatform(idx, 'up')}
-                            disabled={idx === 0}
-                            className="p-1 text-gray-500 hover:text-white disabled:opacity-30"
-                            title="Move up"
-                          >
-                            <ArrowUp className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => handleMovePlatform(idx, 'down')}
-                            disabled={idx === platforms.length - 1}
-                            className="p-1 text-gray-500 hover:text-white disabled:opacity-30"
-                            title="Move down"
-                          >
-                            <ArrowDown className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-
-                        {/* Icon */}
-                        <div
-                          className="w-11 h-11 rounded-xl bg-[#070b09] border-2 p-0.5 flex items-center justify-center shrink-0 overflow-hidden"
-                          style={{ borderColor: platform.glowColor || '#22c55e' }}
-                        >
-                          <img
-                            src={platform.icon}
-                            alt={platform.name}
-                            className="w-full h-full object-cover rounded-lg"
-                          />
-                        </div>
-
-                        {/* Info */}
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <h5 className="font-bold text-sm text-white truncate">{platform.name}</h5>
-                            {platform.category && (
-                              <span className="text-[10px] px-2 py-0.5 rounded-md bg-[#132219] text-emerald-400 border border-[#203a29] font-medium">
-                                {platform.category}
-                              </span>
-                            )}
-                            <span className="text-[10px] px-1.5 py-0.5 rounded font-mono font-semibold uppercase tracking-wider bg-white/5 border border-white/10 text-gray-300">
-                              {platform.openMode === 'internal'
-                                ? '📱 In-App'
-                                : platform.openMode === 'sametab'
-                                ? '🔄 Same Tab'
-                                : platform.openMode === 'external'
-                                ? '↗️ External'
-                                : '🌐 New Tab'}
+                  {platforms.length === 0 ? (
+                    <div className="p-8 text-center rounded-2xl bg-[#0c140f] border border-[#182b1f]">
+                      <p className="text-sm font-semibold text-gray-400 mb-3">Abhi koi platform nahi hai</p>
+                      <button
+                        onClick={handleOpenAddForm}
+                        className="px-4 py-2 rounded-xl bg-emerald-500 text-black text-xs font-bold"
+                      >
+                        + Apna Pehla Platform (#1) Jodein
+                      </button>
+                    </div>
+                  ) : (
+                    platforms.map((platform, idx) => (
+                      <div
+                        key={platform.id}
+                        className="flex items-center justify-between p-3 rounded-2xl bg-[#0c140f] border border-[#182b1f] hover:border-[#243e2d] transition-all group"
+                      >
+                        <div className="flex items-center gap-3 min-w-0 flex-1">
+                          {/* Position Badge Number */}
+                          <div className="flex flex-col items-center justify-center shrink-0">
+                            <span className="w-7 h-7 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-xs font-black font-mono flex items-center justify-center shadow-sm">
+                              #{idx + 1}
                             </span>
                           </div>
-                          <div className="flex items-center gap-2 text-[11px] text-gray-400 truncate">
-                            <Link className="w-3 h-3 shrink-0 text-gray-500" />
-                            <a
-                              href={platform.url}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="hover:text-emerald-400 truncate"
+
+                          {/* Drag / Reorder buttons */}
+                          <div className="flex flex-col gap-0.5">
+                            <button
+                              onClick={() => handleMovePlatform(idx, 'up')}
+                              disabled={idx === 0}
+                              className="p-1 text-gray-500 hover:text-white disabled:opacity-30"
+                              title="Upar le jayein"
                             >
-                              {platform.url}
-                            </a>
+                              <ArrowUp className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => handleMovePlatform(idx, 'down')}
+                              disabled={idx === platforms.length - 1}
+                              className="p-1 text-gray-500 hover:text-white disabled:opacity-30"
+                              title="Neeche le jayein"
+                            >
+                              <ArrowDown className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+
+                          {/* Icon */}
+                          <div
+                            className="w-11 h-11 rounded-xl bg-[#070b09] border-2 p-0.5 flex items-center justify-center shrink-0 overflow-hidden cursor-pointer"
+                            style={{ borderColor: platform.glowColor || '#22c55e' }}
+                            onClick={() => handleEditPlatform(platform)}
+                            title="Click to edit"
+                          >
+                            <img
+                              src={platform.icon}
+                              alt={platform.name}
+                              className="w-full h-full object-cover rounded-lg"
+                            />
+                          </div>
+
+                          {/* Info */}
+                          <div
+                            className="min-w-0 flex-1 cursor-pointer"
+                            onClick={() => handleEditPlatform(platform)}
+                          >
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <h5 className="font-bold text-sm text-white truncate hover:text-emerald-300 transition-colors">
+                                {platform.name}
+                              </h5>
+                              {platform.category && (
+                                <span className="text-[10px] px-2 py-0.5 rounded-md bg-[#132219] text-emerald-400 border border-[#203a29] font-medium">
+                                  {platform.category}
+                                </span>
+                              )}
+                              <span className="text-[10px] px-1.5 py-0.5 rounded font-mono font-semibold uppercase tracking-wider bg-white/5 border border-white/10 text-gray-300">
+                                {platform.openMode === 'internal'
+                                  ? '📱 In-App'
+                                  : platform.openMode === 'sametab'
+                                  ? '🔄 Same Tab'
+                                  : platform.openMode === 'external'
+                                  ? '↗️ External'
+                                  : '🌐 New Tab'}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2 text-[11px] text-gray-400 truncate mt-0.5">
+                              <Link className="w-3 h-3 shrink-0 text-gray-500" />
+                              <span className="truncate">{platform.url}</span>
+                            </div>
                           </div>
                         </div>
-                      </div>
 
-                      {/* Action buttons */}
-                      <div className="flex items-center gap-1.5 shrink-0 ml-3">
-                        <button
-                          onClick={() => handleEditPlatform(platform)}
-                          className="p-2 rounded-xl text-gray-300 hover:text-white bg-[#14221a] hover:bg-[#1a2d23] border border-[#203728] transition-colors"
-                          title="Edit"
-                        >
-                          <Edit2 className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => handleDeletePlatform(platform.id, platform.name)}
-                          className="p-2 rounded-xl text-red-400 hover:text-red-300 bg-red-950/30 hover:bg-red-900/40 border border-red-900/40 transition-colors"
-                          title="Delete"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        {/* Action buttons */}
+                        <div className="flex items-center gap-1.5 shrink-0 ml-3">
+                          {idx > 0 && (
+                            <button
+                              onClick={() => handleMoveToTop(idx)}
+                              className="hidden sm:flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 border border-amber-500/30 text-xs font-semibold transition-colors"
+                              title="#1 number par le jayein"
+                            >
+                              <Star className="w-3 h-3 fill-current" />
+                              <span>#1 Banayein</span>
+                            </button>
+                          )}
+                          <button
+                            onClick={() => handleEditPlatform(platform)}
+                            className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-gray-200 hover:text-white bg-[#14221a] hover:bg-[#1a2d23] border border-[#203728] text-xs font-bold transition-colors cursor-pointer"
+                            title="Edit Platform"
+                          >
+                            <Edit2 className="w-3.5 h-3.5 text-emerald-400" />
+                            <span>Edit</span>
+                          </button>
+                          <button
+                            onClick={() => handleDeletePlatform(platform.id, platform.name)}
+                            className="p-1.5 rounded-xl text-red-400 hover:text-red-300 bg-red-950/30 hover:bg-red-900/40 border border-red-900/40 transition-colors cursor-pointer"
+                            title="Delete"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    ))
+                  )}
                 </div>
               </div>
             )}
@@ -917,7 +1009,6 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                         className="w-full px-3 py-2 rounded-xl bg-[#122119] border border-[#213a29] text-white text-xs outline-none focus:border-emerald-500"
                       />
                     </div>
-
                     <div>
                       <label className="block text-xs font-semibold text-gray-300 mb-1">
                         Button Action Text
@@ -983,19 +1074,19 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                   {/* Logo URL */}
                   <div>
                     <label className="block text-xs font-semibold text-gray-300 mb-1">
-                      Logo Icon URL (Default: /logo.png downloaded from your link)
+                      Logo Icon URL (Default: https://i.ibb.co/Q3g9fGSt/1791541921524.png)
                     </label>
                     <div className="flex items-center gap-3">
                       <input
                         type="text"
                         value={logoUrl}
                         onChange={(e) => setLogoUrl(e.target.value)}
-                        placeholder="/logo.png or https://i.ibb.co/..."
+                        placeholder="https://i.ibb.co/Q3g9fGSt/1791541921524.png or /logo.png"
                         className="flex-1 px-3 py-2 rounded-xl bg-[#122119] border border-[#213a29] text-white text-xs outline-none focus:border-emerald-500"
                       />
                       <div className="w-10 h-10 rounded-xl bg-[#080e0a] border border-emerald-500/40 p-0.5 flex items-center justify-center shrink-0 overflow-hidden">
                         <img
-                          src={logoUrl || '/logo.png'}
+                          src={logoUrl || 'https://i.ibb.co/Q3g9fGSt/1791541921524.png'}
                           alt="Logo Preview"
                           className="w-full h-full object-cover rounded-lg"
                         />
@@ -1037,7 +1128,6 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                   <p className="text-xs text-gray-400">
                     You can save your platforms list, urls, and configurations as a file or restore them anytime.
                   </p>
-
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <button
                       onClick={handleExportJSON}
@@ -1046,7 +1136,6 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                       <Download className="w-4 h-4" />
                       <span>Download Backup JSON</span>
                     </button>
-
                     <label className="p-3.5 rounded-xl bg-[#122119] hover:bg-[#182c22] border border-[#1e3828] flex items-center justify-center gap-2 text-xs font-bold text-sky-400 transition-all cursor-pointer">
                       <Upload className="w-4 h-4" />
                       <span>Upload &amp; Restore Backup</span>

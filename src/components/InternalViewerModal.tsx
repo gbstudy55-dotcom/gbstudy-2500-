@@ -54,6 +54,7 @@ export const InternalViewerModal: React.FC<InternalViewerModalProps> = ({
           >
             <RefreshCw className="w-4 h-4" />
           </button>
+
           <button
             onClick={handleOpenExternal}
             title="Open in Browser / New Tab"
@@ -62,6 +63,7 @@ export const InternalViewerModal: React.FC<InternalViewerModalProps> = ({
             <ExternalLink className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">Open in New Tab</span>
           </button>
+
           <button
             onClick={onClose}
             title="Close"

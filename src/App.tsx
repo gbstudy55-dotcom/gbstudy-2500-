@@ -39,15 +39,16 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
 
-  // Real-time Cloud Firestore Database Sync + Connection Test
+  // Real-time synchronization across ALL users (SSE + Cloud Firestore + API Fallback)
   useEffect(() => {
-    // 1. Test Firestore connection on boot
+    // 1. Initial test of Firestore
     testFirestoreConnection();
 
     // 2. Real-time subscription to platforms from Cloud Firestore
     const unsubPlatforms = subscribeToPlatforms((livePlatforms) => {
       if (livePlatforms && livePlatforms.length > 0) {
         setPlatforms(livePlatforms);
+        localStorage.setItem('gb_study_platforms_v1', JSON.stringify(livePlatforms));
       }
     });
 
@@ -55,31 +56,96 @@ export default function App() {
     const unsubSettings = subscribeToSettings((liveSettings) => {
       if (liveSettings) {
         setSettings(liveSettings);
+        localStorage.setItem('gb_study_settings_v1', JSON.stringify(liveSettings));
       }
     });
 
-    // 4. Safe fallback sync with local server if running (only parse JSON)
-    fetch('/api/data')
-      .then((res) => {
-        const ct = res.headers.get('content-type');
-        if (res.ok && ct && ct.includes('application/json')) {
-          return res.json();
-        }
-        return null;
-      })
-      .then((data) => {
-        if (data && data.platforms && Array.isArray(data.platforms) && data.platforms.length > 0) {
-          setPlatforms(data.platforms);
-        }
-        if (data && data.settings && typeof data.settings === 'object') {
-          setSettings((prev) => ({ ...prev, ...data.settings }));
-        }
-      })
-      .catch(() => {});
+    // 4. Initial fetch from server API
+    const fetchServerData = () => {
+      fetch('/api/data')
+        .then((res) => {
+          const ct = res.headers.get('content-type');
+          if (res.ok && ct && ct.includes('application/json')) {
+            return res.json();
+          }
+          return null;
+        })
+        .then((data) => {
+          if (data && data.platforms && Array.isArray(data.platforms) && data.platforms.length > 0) {
+            setPlatforms(data.platforms);
+            localStorage.setItem('gb_study_platforms_v1', JSON.stringify(data.platforms));
+          }
+          if (data && data.settings && typeof data.settings === 'object') {
+            setSettings((prev) => ({ ...prev, ...data.settings }));
+            localStorage.setItem('gb_study_settings_v1', JSON.stringify(data.settings));
+          }
+        })
+        .catch(() => {});
+    };
+
+    fetchServerData();
+
+    // 5. Real-Time Server-Sent Events (SSE) listener: Instant push when admin makes ANY change
+    let eventSource: EventSource | null = null;
+    try {
+      eventSource = new EventSource('/api/events');
+
+      eventSource.addEventListener('init', (e: MessageEvent) => {
+        try {
+          const parsed = JSON.parse(e.data);
+          if (parsed.data?.platforms && Array.isArray(parsed.data.platforms) && parsed.data.platforms.length > 0) {
+            setPlatforms(parsed.data.platforms);
+            localStorage.setItem('gb_study_platforms_v1', JSON.stringify(parsed.data.platforms));
+          }
+          if (parsed.data?.settings) {
+            setSettings((prev) => ({ ...prev, ...parsed.data.settings }));
+            localStorage.setItem('gb_study_settings_v1', JSON.stringify(parsed.data.settings));
+          }
+        } catch {}
+      });
+
+      eventSource.addEventListener('platforms', (e: MessageEvent) => {
+        try {
+          const parsed = JSON.parse(e.data);
+          if (parsed.data && Array.isArray(parsed.data)) {
+            setPlatforms(parsed.data);
+            localStorage.setItem('gb_study_platforms_v1', JSON.stringify(parsed.data));
+          }
+        } catch {}
+      });
+
+      eventSource.addEventListener('settings', (e: MessageEvent) => {
+        try {
+          const parsed = JSON.parse(e.data);
+          if (parsed.data) {
+            setSettings((prev) => ({ ...prev, ...parsed.data }));
+            localStorage.setItem('gb_study_settings_v1', JSON.stringify(parsed.data));
+          }
+        } catch {}
+      });
+
+      eventSource.addEventListener('reset', () => {
+        storageService.resetDefaults().then((res) => {
+          setPlatforms(res.platforms);
+          setSettings(res.settings);
+        });
+      });
+    } catch (e) {
+      console.warn('SSE connection notice:', e);
+    }
+
+    // 6. Polling fallback every 5 seconds to guarantee all users get updates even on unstable networks
+    const pollInterval = setInterval(() => {
+      fetchServerData();
+    }, 5000);
 
     return () => {
       unsubPlatforms();
       unsubSettings();
+      if (eventSource) {
+        eventSource.close();
+      }
+      clearInterval(pollInterval);
     };
   }, []);
 
@@ -87,17 +153,15 @@ export default function App() {
   useEffect(() => {
     if (settings.telegramPopup.enabled) {
       const hasSeenPopup = sessionStorage.getItem('gb_study_tg_popup_seen');
-      // Always show on fresh tab/session or shortly after load
       const timer = setTimeout(() => {
         setIsTelegramModalOpen(true);
         sessionStorage.setItem('gb_study_tg_popup_seen', 'true');
       }, 400);
-
       return () => clearTimeout(timer);
     }
   }, [settings.telegramPopup.enabled]);
 
-  // Save changes handler (Synchronizes with Cloud Firestore across all users)
+  // Save changes handler (Synchronizes across all users in real-time)
   const handleSavePlatforms = (newPlatforms: Platform[]) => {
     setPlatforms(newPlatforms);
     storageService.savePlatforms(newPlatforms);
@@ -133,17 +197,13 @@ export default function App() {
       setIsAccessKeyModalOpen(true);
       return;
     }
-
     if (!platform.url) return;
-
     const mode = platform.openMode || 'newtab';
-
     if (mode === 'internal') {
       setInternalViewerPlatform(platform);
     } else if (mode === 'sametab') {
       window.location.href = platform.url;
     } else {
-      // 'newtab' or 'external'
       window.open(platform.url, '_blank', 'noopener,noreferrer');
     }
   };
@@ -159,22 +219,21 @@ export default function App() {
     return Array.from(cats);
   }, [platforms]);
 
-  // Filtered platforms
+  // Filtered platforms - strictly sorted by order (1st, 2nd, 3rd...)
   const filteredPlatforms = useMemo(() => {
-    return platforms.filter((p) => {
-      if (!p.active && p.active !== undefined) return false;
-
-      const matchesSearch =
-        searchQuery === '' ||
-        p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (p.category && p.category.toLowerCase().includes(searchQuery.toLowerCase())) ||
-        (p.description && p.description.toLowerCase().includes(searchQuery.toLowerCase()));
-
-      const matchesCategory =
-        selectedCategory === 'all' || (p.category && p.category.toLowerCase() === selectedCategory.toLowerCase());
-
-      return matchesSearch && matchesCategory;
-    });
+    return platforms
+      .filter((p) => {
+        if (!p.active && p.active !== undefined) return false;
+        const matchesSearch =
+          searchQuery === '' ||
+          p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          (p.category && p.category.toLowerCase().includes(searchQuery.toLowerCase())) ||
+          (p.description && p.description.toLowerCase().includes(searchQuery.toLowerCase()));
+        const matchesCategory =
+          selectedCategory === 'all' || (p.category && p.category.toLowerCase() === selectedCategory.toLowerCase());
+        return matchesSearch && matchesCategory;
+      })
+      .sort((a, b) => (a.order || 0) - (b.order || 0));
   }, [platforms, searchQuery, selectedCategory]);
 
   return (
@@ -248,7 +307,6 @@ export default function App() {
               </p>
             </div>
           </div>
-
           <a
             href={settings.telegramChannelUrl}
             target="_blank"
@@ -271,16 +329,14 @@ export default function App() {
                 alt="Logo"
                 className="w-full h-full object-cover"
                 onError={(e) => {
-                  (e.currentTarget as HTMLImageElement).src =
-                    'https://i.ibb.co/mVjJG7Zg/1791541921524.png';
+                  (e.currentTarget as HTMLImageElement).src = '/logo.png';
                 }}
               />
             </div>
             <span className="font-bold text-gray-400">{settings.siteName}</span>
-            <span>—</span>
+            <span>•</span>
             <span className="text-gray-500">Free Education for All</span>
           </div>
-
           <div className="flex items-center gap-4 text-gray-400">
             <a
               href={settings.telegramChannelUrl}

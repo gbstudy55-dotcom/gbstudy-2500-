@@ -69,7 +69,6 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
               <p className="text-[11px] text-gray-400 font-medium leading-none">Free Learning Hub</p>
             </div>
           </div>
-
           <button
             onClick={onClose}
             aria-label="Close menu"
@@ -108,7 +107,6 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
             </div>
             <ExternalLink className="w-3.5 h-3.5 text-gray-500 group-hover:text-gray-300" />
           </a>
-
 
           {/* Platforms Section Divider */}
           <div className="pt-3 pb-1 px-2">
@@ -175,7 +173,6 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
                 </p>
               </div>
             </div>
-
             <button
               onClick={() => {
                 onClose();
