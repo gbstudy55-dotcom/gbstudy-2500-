@@ -1,0 +1,87 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --font-heading: 'Outfit', sans-serif;
+    --font-body: 'Plus Jakarta Sans', sans-serif;
+  }
+
+  body {
+    font-family: var(--font-body);
+    background-color: #070b09;
+    color: #f3f4f6;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-heading);
+  }
+}
+
+/* Custom ambient green glow effects */
+.radial-glow-top {
+  background: radial-gradient(circle at 50% 10%, rgba(34, 197, 94, 0.16) 0%, rgba(16, 185, 129, 0.05) 45%, rgba(7, 11, 9, 0) 70%);
+}
+
+.radial-glow-card {
+  background: radial-gradient(circle at 50% 0%, rgba(34, 197, 94, 0.08) 0%, rgba(7, 11, 9, 0) 100%);
+}
+
+/* Animations */
+@keyframes floatMascot {
+  0%, 100% {
+    transform: translateY(0px) scale(1);
+  }
+  50% {
+    transform: translateY(-8px) scale(1.02);
+  }
+}
+
+@keyframes pulseGlow {
+  0%, 100% {
+    box-shadow: 0 0 15px rgba(34, 197, 94, 0.35), 0 0 35px rgba(34, 197, 94, 0.15);
+  }
+  50% {
+    box-shadow: 0 0 25px rgba(34, 197, 94, 0.65), 0 0 50px rgba(34, 197, 94, 0.3);
+  }
+}
+
+@keyframes telegramPulse {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 4px 20px rgba(14, 165, 233, 0.35);
+  }
+  50% {
+    transform: scale(1.02);
+    box-shadow: 0 6px 28px rgba(14, 165, 233, 0.6);
+  }
+}
+
+.animate-float {
+  animation: floatMascot 4s ease-in-out infinite;
+}
+
+.animate-pulse-glow {
+  animation: pulseGlow 3s ease-in-out infinite;
+}
+
+.animate-telegram-btn {
+  animation: telegramPulse 2.5s ease-in-out infinite;
+}
+
+/* Clean Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #070b09;
+}
+::-webkit-scrollbar-thumb {
+  background: #1b281f;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #25402c;
+}
