@@ -67,8 +67,9 @@ export const HeroHeader: React.FC<HeroHeaderProps> = ({
               alt={settings.siteName}
               className="w-full h-full object-cover rounded-full pointer-events-none"
               onError={(e) => {
-                (e.currentTarget as HTMLImageElement).src =
-                  'https://i.ibb.co/mVjJG7Zg/1791541921524.png';
+                const target = e.currentTarget as HTMLImageElement;
+                target.onerror = null;
+                target.src = '/logo.png';
               }}
             />
           </div>

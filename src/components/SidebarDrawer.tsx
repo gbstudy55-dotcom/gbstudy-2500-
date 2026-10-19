@@ -53,8 +53,9 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
                 alt="Logo"
                 className="w-full h-full object-cover rounded-lg"
                 onError={(e) => {
-                  (e.currentTarget as HTMLImageElement).src =
-                    'https://i.ibb.co/mVjJG7Zg/1791541921524.png';
+                  const target = e.currentTarget as HTMLImageElement;
+                  target.onerror = null;
+                  target.src = '/logo.png';
                 }}
               />
             </div>

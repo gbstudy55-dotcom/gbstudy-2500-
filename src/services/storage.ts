@@ -1,5 +1,12 @@
 import { Platform, SiteSettings } from '../types';
 import { defaultPlatforms, defaultSettings } from '../data/defaultPlatforms';
+import {
+  saveAllPlatformsToFirestore,
+  saveSettingsToFirestore,
+  deletePlatformFromFirestore,
+  sanitizePlatform,
+  sanitizeSettings,
+} from './firebase';
 
 const STORAGE_KEY_PLATFORMS = 'gb_study_platforms_v1';
 const STORAGE_KEY_SETTINGS = 'gb_study_settings_v1';
@@ -11,33 +18,36 @@ export const storageService = {
       if (data) {
         const parsed = JSON.parse(data);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
+          return parsed.map((p) => sanitizePlatform(p));
         }
       }
     } catch (e) {
       console.warn('Error reading platforms from storage:', e);
     }
-    return defaultPlatforms;
+    return defaultPlatforms.map((p) => sanitizePlatform(p));
   },
 
-  savePlatforms(platforms: Platform[]): void {
+  async savePlatforms(platforms: Platform[]): Promise<void> {
+    const cleaned = platforms.map((p, i) => sanitizePlatform({ ...p, order: i + 1 }));
     try {
-      localStorage.setItem(STORAGE_KEY_PLATFORMS, JSON.stringify(platforms));
-      // Background sync with Firestore
-      import('./firebase').then(({ saveAllPlatformsToFirestore }) => {
-        saveAllPlatformsToFirestore(platforms).catch((e) => console.warn('Firestore sync note:', e));
-      });
-      // Try background sync with server if available
-      fetch('/api/platforms', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ platforms }),
-      }).catch(() => {
-        // Silent catch if backend server not running
-      });
+      localStorage.setItem(STORAGE_KEY_PLATFORMS, JSON.stringify(cleaned));
     } catch (e) {
-      console.error('Error saving platforms to storage:', e);
+      console.error('Error saving platforms to localStorage:', e);
     }
+
+    // Direct synchronization to Cloud Firestore (Handles Adds, Edits, Deletes & Order across all users)
+    try {
+      await saveAllPlatformsToFirestore(cleaned);
+    } catch (err) {
+      console.warn('Firestore sync note:', err);
+    }
+
+    // Optional local server backup
+    fetch('/api/platforms', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ platforms: cleaned }),
+    }).catch(() => {});
   },
 
   getSettings(): SiteSettings {
@@ -61,44 +71,57 @@ export const storageService = {
         if (!result.adminPasscode || result.adminPasscode === 'gbstudy123' || result.adminPasscode === 'admin123') {
           result.adminPasscode = 'GBADMIN2026';
         }
-        return result;
+        return sanitizeSettings(result);
       }
     } catch (e) {
       console.warn('Error reading settings from storage:', e);
     }
-    return defaultSettings;
+    return sanitizeSettings(defaultSettings);
   },
 
-  saveSettings(settings: SiteSettings): void {
+  async saveSettings(settings: SiteSettings): Promise<void> {
+    const clean = sanitizeSettings(settings);
     try {
-      localStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(settings));
-      // Background sync with Firestore
-      import('./firebase').then(({ saveSettingsToFirestore }) => {
-        saveSettingsToFirestore(settings).catch((e) => console.warn('Firestore settings sync note:', e));
-      });
-      // Try background sync with server if available
-      fetch('/api/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ settings }),
-      }).catch(() => {
-        // Silent catch
-      });
+      localStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(clean));
     } catch (e) {
-      console.error('Error saving settings to storage:', e);
+      console.error('Error saving settings to localStorage:', e);
     }
+
+    // Direct synchronization to Cloud Firestore
+    try {
+      await saveSettingsToFirestore(clean);
+    } catch (err) {
+      console.warn('Firestore settings sync note:', err);
+    }
+
+    fetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ settings: clean }),
+    }).catch(() => {});
   },
 
-  resetDefaults(): { platforms: Platform[]; settings: SiteSettings } {
+  async resetDefaults(): Promise<{ platforms: Platform[]; settings: SiteSettings }> {
+    const cleanPlatforms = defaultPlatforms.map((p, i) => sanitizePlatform({ ...p, order: i + 1 }));
+    const cleanSettings = sanitizeSettings(defaultSettings);
+
     try {
-      localStorage.setItem(STORAGE_KEY_PLATFORMS, JSON.stringify(defaultPlatforms));
-      localStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(defaultSettings));
+      localStorage.setItem(STORAGE_KEY_PLATFORMS, JSON.stringify(cleanPlatforms));
+      localStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(cleanSettings));
     } catch (e) {
       console.error('Error resetting storage:', e);
     }
+
+    try {
+      await saveAllPlatformsToFirestore(cleanPlatforms);
+      await saveSettingsToFirestore(cleanSettings);
+    } catch (err) {
+      console.warn('Error resetting Firestore defaults:', err);
+    }
+
     return {
-      platforms: defaultPlatforms,
-      settings: defaultSettings,
+      platforms: cleanPlatforms,
+      settings: cleanSettings,
     };
   },
 
@@ -112,14 +135,14 @@ export const storageService = {
     return JSON.stringify(data, null, 2);
   },
 
-  importConfig(jsonString: string): boolean {
+  async importConfig(jsonString: string): Promise<boolean> {
     try {
       const parsed = JSON.parse(jsonString);
       if (parsed.platforms && Array.isArray(parsed.platforms)) {
-        this.savePlatforms(parsed.platforms);
+        await this.savePlatforms(parsed.platforms);
       }
       if (parsed.settings && typeof parsed.settings === 'object') {
-        this.saveSettings(parsed.settings);
+        await this.saveSettings(parsed.settings);
       }
       return true;
     } catch (e) {

@@ -7,7 +7,7 @@ service cloud.firestore {
     }
 
     function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-\\.]+$');
     }
 
     function incoming() {
@@ -16,15 +16,15 @@ service cloud.firestore {
 
     function isValidPlatform(data) {
       return data.id is string && data.id.size() <= 128
-        && data.name is string && data.name.size() <= 100
-        && data.url is string && data.url.size() <= 500
+        && data.name is string && data.name.size() <= 200
+        && data.url is string && data.url.size() <= 2048
         && data.order is number
         && data.active is bool;
     }
 
     function isValidSettings(data) {
-      return data.siteName is string && data.siteName.size() <= 100
-        && data.telegramChannelUrl is string && data.telegramChannelUrl.size() <= 500;
+      return data.siteName is string && data.siteName.size() <= 200
+        && data.telegramChannelUrl is string && data.telegramChannelUrl.size() <= 2048;
     }
 
     // Platforms collection - public read for students, schema validated writes

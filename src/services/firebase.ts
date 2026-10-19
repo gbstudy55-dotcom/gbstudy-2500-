@@ -14,7 +14,7 @@ import firebaseConfig from '../../firebase-applet-config.json';
 import { Platform, SiteSettings } from '../types';
 import { defaultPlatforms, defaultSettings } from '../data/defaultPlatforms';
 
-// Initialize Firebase App & Firestore
+// Initialize Firebase App & Firestore Database
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 
@@ -39,14 +39,53 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
     operationType,
     path,
   };
-  console.warn('Firestore Operation Error: ', JSON.stringify(errInfo));
+  console.warn('Firestore Operation Note: ', JSON.stringify(errInfo));
+}
+
+// Clean helper to guarantee NO 'undefined' fields reach Firestore
+export function sanitizePlatform(p: Partial<Platform>): Platform {
+  return {
+    id: String(p.id || `custom-${Date.now()}`),
+    name: String(p.name || 'Platform'),
+    url: String(p.url || ''),
+    icon: String(p.icon || ''),
+    glowColor: String(p.glowColor || '#22c55e'),
+    category: String(p.category || 'General'),
+    description: String(p.description || ''),
+    order: typeof p.order === 'number' ? p.order : 0,
+    active: p.active !== false,
+    openMode: p.openMode || 'newtab',
+  };
+}
+
+export function sanitizeSettings(s: Partial<SiteSettings>): SiteSettings {
+  return {
+    siteName: String(s.siteName || defaultSettings.siteName),
+    tagline: String(s.tagline || defaultSettings.tagline),
+    logoUrl: String(s.logoUrl || defaultSettings.logoUrl),
+    telegramChannelUrl: String(s.telegramChannelUrl || defaultSettings.telegramChannelUrl),
+    telegramPopup: {
+      enabled: s.telegramPopup?.enabled !== false,
+      title: String(s.telegramPopup?.title || defaultSettings.telegramPopup.title),
+      description: String(s.telegramPopup?.description || defaultSettings.telegramPopup.description),
+      membersText: String(s.telegramPopup?.membersText || defaultSettings.telegramPopup.membersText),
+      btnText: String(s.telegramPopup?.btnText || defaultSettings.telegramPopup.btnText),
+    },
+    accessKeySettings: {
+      enabled: Boolean(s.accessKeySettings?.enabled),
+      validKeys: Array.isArray(s.accessKeySettings?.validKeys)
+        ? s.accessKeySettings.validKeys
+        : defaultSettings.accessKeySettings.validKeys,
+      getKeyUrl: String(s.accessKeySettings?.getKeyUrl || defaultSettings.accessKeySettings.getKeyUrl),
+    },
+    adminPasscode: String(s.adminPasscode || defaultSettings.adminPasscode),
+  };
 }
 
 // Test Connection on Startup
 export async function testFirestoreConnection() {
   try {
     await getDocFromServer(doc(db, 'settings', 'general'));
-    console.log('Connected to Cloud Firestore database successfully.');
   } catch (error) {
     if (error instanceof Error && error.message.includes('the client is offline')) {
       console.warn('Firestore offline fallback active.');
@@ -54,7 +93,7 @@ export async function testFirestoreConnection() {
   }
 }
 
-// Subscribe to platforms in real-time
+// Subscribe to platforms in real-time (All users receive live updates instantly)
 export function subscribeToPlatforms(
   onUpdate: (platforms: Platform[]) => void
 ): () => void {
@@ -66,13 +105,13 @@ export function subscribeToPlatforms(
       if (!snapshot.empty) {
         const list: Platform[] = [];
         snapshot.forEach((d) => {
-          list.push(d.data() as Platform);
+          list.push(sanitizePlatform(d.data() as Platform));
         });
         // Sort by order ascending
         list.sort((a, b) => (a.order || 0) - (b.order || 0));
         onUpdate(list);
       } else {
-        // If collection is empty, seed defaults
+        // If collection is empty, seed initial defaults to Cloud Firestore
         seedInitialFirestoreData();
       }
     },
@@ -94,22 +133,11 @@ export function subscribeToSettings(
     settingsDoc,
     (snapshot) => {
       if (snapshot.exists()) {
-        const data = snapshot.data() as SiteSettings;
-        onUpdate({
-          ...defaultSettings,
-          ...data,
-          telegramPopup: {
-            ...defaultSettings.telegramPopup,
-            ...(data.telegramPopup || {}),
-          },
-          accessKeySettings: {
-            ...defaultSettings.accessKeySettings,
-            ...(data.accessKeySettings || {}),
-          },
-        });
+        const data = snapshot.data();
+        onUpdate(sanitizeSettings(data as Partial<SiteSettings>));
       } else {
-        // Seed settings
-        setDoc(settingsDoc, defaultSettings).catch((e) =>
+        // Seed default settings to Firestore
+        setDoc(settingsDoc, sanitizeSettings(defaultSettings)).catch((e) =>
           handleFirestoreError(e, OperationType.WRITE, 'settings/general')
         );
       }
@@ -122,33 +150,50 @@ export function subscribeToSettings(
   return unsubscribe;
 }
 
-// Save single platform
-export async function savePlatformToFirestore(platform: Platform): Promise<void> {
-  const docRef = doc(db, 'platforms', platform.id);
-  try {
-    await setDoc(docRef, platform);
-  } catch (err) {
-    handleFirestoreError(err, OperationType.WRITE, `platforms/${platform.id}`);
-    throw err;
-  }
-}
-
-// Save all platforms (e.g. on reorder or bulk save)
+// Save all platforms: Synchronizes local list with Cloud Firestore
+// - Automatically DELETES documents from Firestore that were deleted in admin
+// - Upserts all active/reordered platforms
 export async function saveAllPlatformsToFirestore(platforms: Platform[]): Promise<void> {
-  const batch = writeBatch(db);
-  platforms.forEach((p) => {
-    const docRef = doc(db, 'platforms', p.id);
-    batch.set(docRef, p);
-  });
   try {
+    const snapshot = await getDocs(collection(db, 'platforms'));
+    const remoteDocIds = new Set(snapshot.docs.map((d) => d.id));
+    const localDocIds = new Set(platforms.map((p) => p.id));
+
+    const batch = writeBatch(db);
+
+    // 1. Delete documents that are no longer in platforms list
+    for (const remoteId of remoteDocIds) {
+      if (!localDocIds.has(remoteId)) {
+        batch.delete(doc(db, 'platforms', remoteId));
+      }
+    }
+
+    // 2. Set/Update all current platforms with clean data
+    platforms.forEach((p, idx) => {
+      const clean = sanitizePlatform({ ...p, order: idx + 1 });
+      batch.set(doc(db, 'platforms', clean.id), clean);
+    });
+
     await batch.commit();
   } catch (err) {
-    handleFirestoreError(err, OperationType.WRITE, 'platforms (batch)');
+    handleFirestoreError(err, OperationType.WRITE, 'platforms');
     throw err;
   }
 }
 
-// Delete single platform
+// Save single platform
+export async function savePlatformToFirestore(platform: Platform): Promise<void> {
+  const clean = sanitizePlatform(platform);
+  const docRef = doc(db, 'platforms', clean.id);
+  try {
+    await setDoc(docRef, clean);
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, `platforms/${clean.id}`);
+    throw err;
+  }
+}
+
+// Delete single platform directly from Firestore
 export async function deletePlatformFromFirestore(platformId: string): Promise<void> {
   const docRef = doc(db, 'platforms', platformId);
   try {
@@ -159,31 +204,30 @@ export async function deletePlatformFromFirestore(platformId: string): Promise<v
   }
 }
 
-// Save site settings
+// Save site settings to Firestore
 export async function saveSettingsToFirestore(settings: SiteSettings): Promise<void> {
+  const clean = sanitizeSettings(settings);
   const settingsDoc = doc(db, 'settings', 'general');
   try {
-    await setDoc(settingsDoc, settings);
+    await setDoc(settingsDoc, clean);
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, 'settings/general');
     throw err;
   }
 }
 
-// Seed initial default platforms into Cloud Firestore
+// Seed initial platforms into Cloud Firestore
 export async function seedInitialFirestoreData(): Promise<void> {
   try {
     const snapshot = await getDocs(collection(db, 'platforms'));
     if (snapshot.empty) {
-      console.log('Seeding initial platforms to Firestore...');
       const batch = writeBatch(db);
-      defaultPlatforms.forEach((p) => {
-        const docRef = doc(db, 'platforms', p.id);
-        batch.set(docRef, p);
+      defaultPlatforms.forEach((p, idx) => {
+        const clean = sanitizePlatform({ ...p, order: idx + 1 });
+        batch.set(doc(db, 'platforms', clean.id), clean);
       });
       await batch.commit();
-      await setDoc(doc(db, 'settings', 'general'), defaultSettings);
-      console.log('Firestore initial seed complete.');
+      await setDoc(doc(db, 'settings', 'general'), sanitizeSettings(defaultSettings));
     }
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, 'seed');

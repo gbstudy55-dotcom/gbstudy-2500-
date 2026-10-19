@@ -12,6 +12,11 @@ import { TelegramModal } from './components/TelegramModal';
 import { AdminModal } from './components/AdminModal';
 import { AccessKeyModal } from './components/AccessKeyModal';
 import { InternalViewerModal } from './components/InternalViewerModal';
+import {
+  testFirestoreConnection,
+  subscribeToPlatforms,
+  subscribeToSettings,
+} from './services/firebase';
 import { storageService } from './services/storage';
 import { Platform, SiteSettings } from './types';
 import { Send, Sparkles } from 'lucide-react';
@@ -37,34 +42,31 @@ export default function App() {
   // Real-time Cloud Firestore Database Sync + Connection Test
   useEffect(() => {
     // 1. Test Firestore connection on boot
-    import('./services/firebase').then(({ testFirestoreConnection, subscribeToPlatforms, subscribeToSettings }) => {
-      testFirestoreConnection();
+    testFirestoreConnection();
 
-      // 2. Subscribe to real-time platforms updates from Cloud Firestore
-      const unsubPlatforms = subscribeToPlatforms((livePlatforms) => {
-        if (livePlatforms && livePlatforms.length > 0) {
-          setPlatforms(livePlatforms);
-        }
-      });
-
-      // 3. Subscribe to real-time site settings from Cloud Firestore
-      const unsubSettings = subscribeToSettings((liveSettings) => {
-        if (liveSettings) {
-          setSettings(liveSettings);
-        }
-      });
-
-      return () => {
-        unsubPlatforms();
-        unsubSettings();
-      };
-    }).catch((err) => {
-      console.warn('Firestore initialization notice:', err);
+    // 2. Real-time subscription to platforms from Cloud Firestore
+    const unsubPlatforms = subscribeToPlatforms((livePlatforms) => {
+      if (livePlatforms && livePlatforms.length > 0) {
+        setPlatforms(livePlatforms);
+      }
     });
 
-    // Fallback sync with local backend server if running
+    // 3. Real-time subscription to site settings from Cloud Firestore
+    const unsubSettings = subscribeToSettings((liveSettings) => {
+      if (liveSettings) {
+        setSettings(liveSettings);
+      }
+    });
+
+    // 4. Safe fallback sync with local server if running (only parse JSON)
     fetch('/api/data')
-      .then((res) => (res.ok ? res.json() : null))
+      .then((res) => {
+        const ct = res.headers.get('content-type');
+        if (res.ok && ct && ct.includes('application/json')) {
+          return res.json();
+        }
+        return null;
+      })
       .then((data) => {
         if (data && data.platforms && Array.isArray(data.platforms) && data.platforms.length > 0) {
           setPlatforms(data.platforms);
@@ -74,6 +76,11 @@ export default function App() {
         }
       })
       .catch(() => {});
+
+    return () => {
+      unsubPlatforms();
+      unsubSettings();
+    };
   }, []);
 
   // Show Telegram Popup on initial visit (matching video behavior)
@@ -90,7 +97,7 @@ export default function App() {
     }
   }, [settings.telegramPopup.enabled]);
 
-  // Save changes handler
+  // Save changes handler (Synchronizes with Cloud Firestore across all users)
   const handleSavePlatforms = (newPlatforms: Platform[]) => {
     setPlatforms(newPlatforms);
     storageService.savePlatforms(newPlatforms);
@@ -101,8 +108,8 @@ export default function App() {
     storageService.saveSettings(newSettings);
   };
 
-  const handleResetDefaults = () => {
-    const res = storageService.resetDefaults();
+  const handleResetDefaults = async () => {
+    const res = await storageService.resetDefaults();
     setPlatforms(res.platforms);
     setSettings(res.settings);
   };
